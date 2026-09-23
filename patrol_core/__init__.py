@@ -16,6 +16,8 @@ patrol_core — 巡检/导览机器人的**核心逻辑层**（纯 Python，零�
     │  anomaly   异常判定（去抖 + 分级）          │
     │  backend   导航后端抽象（ROS2 / 仿真）      │
     │  report    巡检报告                         │
+    │  slam      2D 占据栅格建图（log-odds）      │
+    │  planning  A*/Dijkstra 规划 + EKF 融合定位  │
     └────────────────────────────────────────────┘
 
 为什么要这么分：
@@ -33,6 +35,10 @@ from .anomaly import (AnomalyDetector, ChannelRule, Alarm, Severity,
                       State as ChannelStateEnum)
 from .mission import PatrolMission, State, Progress, StepRecord
 from .report import build_report, to_json, to_csv, to_text, save
+from .slam import (GridMap, OccupancyMapper, make_room_map,
+                   raycast_ground_truth, prob_to_logodds, logodds_to_prob)
+from .planning import (astar, dijkstra, plan_path, tighten_path, smooth_path,
+                       path_cost, path_length, EKF2D, odom_motion_model)
 
 __version__ = "1.0.0"
 
@@ -43,4 +49,10 @@ __all__ = [
     "AnomalyDetector", "ChannelRule", "Alarm", "Severity", "ChannelStateEnum",
     "PatrolMission", "State", "Progress", "StepRecord",
     "build_report", "to_json", "to_csv", "to_text", "save",
+    # SLAM 建图
+    "GridMap", "OccupancyMapper", "make_room_map", "raycast_ground_truth",
+    "prob_to_logodds", "logodds_to_prob",
+    # 定位与规划
+    "astar", "dijkstra", "plan_path", "tighten_path", "smooth_path",
+    "path_cost", "path_length", "EKF2D", "odom_motion_model",
 ]
