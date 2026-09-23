@@ -1,0 +1,104 @@
+﻿name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-tests:
+    name: core & tests (py${{ matrix.python }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.8", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: 单元测试（不需要 ROS2）
+        shell: bash
+        run: python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee test_output.txt
+
+      - name: 端到端演示
+        shell: bash
+        run: python demo.py | tee demo_output.txt
+
+      - name: 路线配置能加载并真跑通
+        shell: bash
+        run: python - <<'PY'
+          import json, sys
+          sys.path.insert(0, ".")
+          from patrol_ros.patrol_node import route_from_dict, detector_from_route
+          from patrol_core import PatrolMission, SimNavBackend, State
+
+          for f in ("config/patrol_route.json", "config/guide_route.json"):
+              r = route_from_dict(json.load(open(f, encoding="utf-8")))
+              assert r.validate() == [], "路线校验失败: %s" % r.validate()
+              m = PatrolMission(r, SimNavBackend(speed_mps=2.0),
+                                detector_from_route(r), reader=lambda i: 10.0)
+              assert m.run_once() == State.DONE
+              print("%s: %d 个点，跑通" % (r.name, len(r)))
+          PY
+
+      - name: 关键断言（边界行为不能被改坏）
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, re
+          txt = pathlib.Path("test_output.txt").read_text(encoding="utf-8", errors="replace")
+          assert "OK" in txt and "FAILED" not in txt, "单元测试未全通过"
+          for key in ("test_loop_without_max_laps_is_rejected",
+                      "test_waypoint_failure_retries_then_skips",
+                      "test_low_battery_goes_charging_and_resumes",
+                      "test_debounce_swallows_single_spike_in_patrol",
+                      "test_recovery_debounced",
+                      "test_infinite_loop_config_rejected"):
+              assert key in txt, "缺少关键用例: %s" % key
+              print("关键用例存在:", key)
+          PY
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: patrol-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            test_output.txt
+            demo_output.txt
+            patrol_report.json
+            patrol_report.csv
+            patrol_report.txt
+          if-no-files-found: warn
+
+  no-ros2-import-guard:
+    name: 无 ROS2 环境不应崩（给出明确提示）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 确认 patrol_ros 在无 rclpy 时能 import，且后端给出清晰错误
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          import patrol_ros                      # 不应抛 ImportError
+          from patrol_ros.nav_backend import Ros2NavBackend, HAS_ROS2
+          print("HAS_ROS2 =", HAS_ROS2)
+          assert HAS_ROS2 is False, "CI 里不应该有 ROS2"
+          try:
+              Ros2NavBackend()
+          except RuntimeError as e:
+              print("占位实现给出明确提示:", str(e).splitlines()[0])
+          else:
+              raise AssertionError("无 ROS2 时应抛 RuntimeError 并给出提示")
+          PY

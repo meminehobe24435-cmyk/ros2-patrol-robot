@@ -1,0 +1,52 @@
+{
+  "name": "展厅导览 B 线",
+  "kind": "guide",
+  "loop": false,
+  "max_laps": 1,
+  "return_home": true,
+  "waypoints": [
+    {
+      "name": "接待点",
+      "kind": "home",
+      "pose": { "x": 0.0, "y": 0.0, "yaw": 0.0 },
+      "action": "none",
+      "dwell_s": 1.0
+    },
+    {
+      "name": "序厅",
+      "kind": "guide",
+      "pose": { "x": 3.0, "y": 0.0, "yaw": 0.0 },
+      "action": "speak",
+      "dwell_s": 20.0,
+      "timeout_s": 45.0,
+      "speech": "欢迎参观，序厅介绍的是本馆的整体布局与参观动线。"
+    },
+    {
+      "name": "工艺展区",
+      "kind": "guide",
+      "pose": { "x": 8.0, "y": 0.0, "yaw": 0.0 },
+      "action": "speak",
+      "dwell_s": 35.0,
+      "timeout_s": 60.0,
+      "speech": "这里是工艺展区，展示从原材料到成品的完整工艺流程。"
+    },
+    {
+      "name": "产品展区",
+      "kind": "guide",
+      "pose": { "x": 8.0, "y": 6.0, "yaw": 1.5708 },
+      "action": "speak",
+      "dwell_s": 30.0,
+      "timeout_s": 60.0,
+      "speech": "产品展区陈列了历代主力产品，右侧是最新发布的一代。"
+    },
+    {
+      "name": "休息区",
+      "kind": "guide",
+      "pose": { "x": 0.0, "y": 6.0, "yaw": 3.1416 },
+      "action": "speak",
+      "dwell_s": 15.0,
+      "timeout_s": 60.0,
+      "speech": "参观到这里结束，休息区提供饮水，出口在您的左前方。"
+    }
+  ]
+}

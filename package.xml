@@ -1,0 +1,22 @@
+﻿<?xml version="1.0"?>
+<!--
+  ROS2 包描述。核心逻辑 patrol_core 不依赖 ROS2，
+  所以即使没有装 ROS2 也能直接 python demo.py / unittest 跑通。
+-->
+<package format="3">
+  <name>patrol_robot</name>
+  <version>1.0.0</version>
+  <description>ROS2 巡检/导览机器人：按点位自主导航、到点检测或讲解、异常分级告警、低电回充与断点续巡</description>
+  <maintainer email="dev@example.com">patrol robot maintainer</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,193 @@
+# ros2-patrol-robot — ROS2 巡检 / 导览机器人
+
+> 面向**机器人巡检**与**导向导览**两类任务的 ROS2 应用：
+> 按点位顺序自主导航，到点执行检测或讲解，异常分级告警，低电量自动回充并**断点续巡**。
+>
+> **纯 Python · 零第三方依赖 · 56 项单元测试**（不需要 ROS2 即可全部跑通）
+
+![python](https://img.shields.io/badge/python-3.8%2B-blue)
+![ros2](https://img.shields.io/badge/ROS2-Humble%2FIron-22314E)
+![deps](https://img.shields.io/badge/deps-none%20for%20core-green)
+![tests](https://img.shields.io/badge/tests-56%20passed-brightgreen)
+
+---
+
+## 1. 这个项目解决什么
+
+「巡检机器人」和「导览机器人」在软件层面其实是**同一件事**：
+
+```
+按顺序走到若干点位 → 到点执行一个动作 → 去下一个点
+                       ├─ 巡检：测温/读表/拍照 → 判超限 → 告警
+                       └─ 导览：播报讲解词 → 等游客 → 下一站
+```
+
+差别只在"到点做什么"，所以本项目用**同一套框架**支持两种任务，只靠配置区分。
+
+现场真正难的不是"走一遍"，而是这几件：
+
+| 现场问题 | 本项目的处理 |
+|---|---|
+| **某个点过不去** | 单点重试 → 仍失败则**跳过并记录**，后面的点继续走（不能整趟崩） |
+| **传感器抖动** | 异常判定带**去抖**（连续 N 次才确认）与**恢复去抖**（避免告警横跳） |
+| **电量不够** | 低电量**中断任务去充电**，充完**从断点续巡**（不是从头再来） |
+| **要能人工打断** | 随时中止 → 记录断点 → 下次从断点继续 |
+| **没有机器人怎么开发** | 导航抽象成 `NavBackend`，`SimNavBackend` **没有 ROS2 也能端到端跑通** |
+| **交付要留档** | 自动生成 **JSON / CSV / 文本**三种巡检报告 |
+
+---
+
+## 2. 快速开始（不需要 ROS2）
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'   # 56 项单元测试
+python demo.py                                        # 三种场景端到端演示
+python demo.py patrol | guide | fault                 # 单独跑
+```
+
+`demo.py` 会打印巡检报告、导览播报记录、故障跳过与断点续巡的完整过程，
+并导出 `patrol_report.json / .csv / .txt`。
+
+**上真机**（需要 ROS2 + Nav2）：
+
+```bash
+colcon build --packages-select patrol_robot
+source install/setup.bash
+ros2 launch patrol_robot patrol.launch.py route_file:=$(pwd)/config/patrol_route.json
+ros2 topic pub /patrol/command/start std_msgs/Bool "{data: true}"
+```
+
+---
+
+## 3. 分层设计（本项目最重要的决定）
+
+```
+┌──────────────────────────────────────────────┐
+│  patrol_ros/   ROS2 节点层                    │  ← 接真实机器人
+│  Nav2 Action / 话题 / 服务 / 参数             │     ⚠️ 未上机验证
+├──────────────────────────────────────────────┤
+│                 只调用接口                     │
+├──────────────────────────────────────────────┤
+│  patrol_core/  核心逻辑（纯 Python）          │  ← 56 项单测全在这
+│  waypoint  点位与路线、最近邻排序             │
+│  mission   任务编排与状态机                   │
+│  anomaly   异常判定（去抖 + 分级 + 恢复）     │
+│  backend   导航后端抽象（ROS2 / 仿真）        │
+│  report    巡检报告（JSON / CSV / 文本）      │
+└──────────────────────────────────────────────┘
+```
+
+**为什么这么分**：ROS2 环境重、依赖多，**任务逻辑不该被它绑住**。
+把导航抽象成 `NavBackend` 之后，"单点失败重试""低电断点续巡""告警去抖"
+这些**现场最容易出问题的地方**都能在毫秒级跑完的单元测试里覆盖。
+换导航栈（Nav2 / 自研 / 别的中间件）只换后端，上层不动。
+
+---
+
+## 4. 目录结构
+
+```
+patrol_core/                  核心逻辑（零依赖）
+  waypoint.py                 点位/路线模型、校验、最近邻路径优化
+  mission.py                  任务编排与状态机（含断点续巡、低电回充）
+  anomaly.py                  异常判定：去抖、分级（WARNING/CRITICAL）、恢复判定
+  backend.py                  导航后端抽象 + SimNavBackend + ScriptedNavBackend
+  report.py                   巡检报告（文本摘要 / JSON / CSV 带 BOM）
+patrol_ros/                   ROS2 节点层
+  nav_backend.py              Ros2NavBackend：调 Nav2 的 NavigateToPose Action
+  patrol_node.py              PatrolNode：参数/话题/服务，按路线 JSON 执行
+config/                       路线配置（改路线不用改代码）
+  patrol_route.json           车间巡检路线（6 个点，含测温/读表/振动）
+  guide_route.json            展厅导览路线（4 个展点讲解词）
+tests/                        56 项单元测试
+demo.py                       巡检 / 导览 / 故障三种场景演示
+```
+
+---
+
+## 5. 实测结果
+
+```
+Ran 56 tests in 0.008s
+OK
+```
+
+`demo.py` 输出摘要：
+
+**① 巡检模式**（含分级告警）
+```
+路线：车间巡检 A 线   结束状态：done
+圈数 1｜到访 6｜成功 6｜失败 0｜告警 2
+告警分级：CRITICAL 1｜WARNING 1
+[OK ] 配电柜-2   柜2温度=88.00  [!] 柜2温度(critical)
+[OK ] 总电表     总电流=76.00 电压=372.00  [!] 电压(warning)
+```
+
+**② 导览模式**（到点语音播报）
+```
+1. 欢迎参观，序厅介绍的是本馆的整体布局与参观动线。
+2. 这里是工艺展区，展示从原材料到成品的完整工艺流程。
+3. 产品展区陈列了历代主力产品，右侧是最新发布的一代。
+4. 参观到这里结束，休息区提供饮水，出口在您的左前方。
+```
+
+**③ 故障处理与断点续巡**
+```
+① 单点被挡：尝试 2 次后跳过，其余点仍完成（成功 5 / 跳过 1）
+② 低电量续巡：到访充电桩 True
+   [->] low_battery（电量 12%）→ charging → patrolling（充电完成，续巡）→ done
+③ 中止后状态 paused，断点在第 5 个点；续巡完成 resumed_from = 第 5 个点
+```
+
+---
+
+## 6. 开发中踩到并修掉的问题
+
+| # | 问题 | 性质 | 根因与修复 |
+|---|---|---|---|
+| 1 | ⭐ **危险默认值：无限循环** | **实现真 bug** | `Route` 默认 `loop=True` 且 `max_laps=0` → 任务**永远跑不停**（真实部署意味着机器人一直绕圈）。这个 bug 是"跑测试卡死不返回"暴露的。改为：**循环必须显式给圈数**，否则 `validate()` 直接拒绝，并补了一条专门的用例守住它 |
+| 2 | ⭐ **恢复去抖期间告警被丢掉** | **实现真 bug** | 状态转成 `RECOVERING` 后，`active_alarms()` 与 `update()` 都不再返回告警 → 运维看到"没告警了"以为已恢复。而"恢复去抖"的意义恰恰是**在确认恢复前警报仍然有效**。改为 RECOVERING 也算有告警 |
+| 3 | ⭐ **cancel() 被吞掉** | **实现真 bug** | `goto()` 一进来就把取消标志清零，导致"先 cancel 再 goto"时取消无效。改为**先判后清** |
+| 4 | 命名歧义 `state_of()` | 可维护性 | 它返回的是**状态枚举**，拿不到通道累计告警次数，测试里踩到了。补 `alarm_count_of()` 明确命名 |
+| 5 | `normalize_angle(-3π)` 返回 π | 我的测试预期错 | 归一到 (-π, π]，所以 π 是对的，我原来写 -π |
+| 6 | 电量分级测试预期错 | 我的测试预期错 | 下限 20、`critical_ratio` 1.5 时，超出幅度 ≥ 10 就是 CRITICAL；读数 10 恰好达到，应该用 19 才测得到 WARNING |
+| 7 | 告警测试不触发 | 我的测试预期错 | 检测器去抖 N=2，而巡检每点只读一次 → 单次超限**不该**告警。改用 N=1 的检测器测告警，**并补了一条反向用例**守住"去抖要吞掉单次毛刺" |
+| 8 | `⚠` 字符导致控制台崩 | 环境问题 | Windows 控制台默认 GBK，打印非 ASCII 抛 `UnicodeEncodeError`。报告改用 ASCII 标记 `[!]`，demo 里重配 stdout 为 UTF-8 |
+
+> 前三条是**实现里的真 bug**，其中第 1 条（无限循环）只在真实部署时才会暴露成
+> "机器人一直跑不停"这种严重问题 —— 它是被"测试卡死"这个现象揪出来的。
+
+---
+
+## 7. 边界说明（重要）
+
+### ⚠️ ROS2 层**未上机验证**
+
+**开发环境没有 ROS2**（Windows + Python 3.8 无法直接跑 rclpy）。
+因此：
+
+- `patrol_ros/nav_backend.py`（Nav2 Action 客户端）与
+  `patrol_ros/patrol_node.py`（节点/话题/服务）**是按 rclpy 与 Nav2 的接口规范编写的，
+  没有在真实机器人或 Gazebo 仿真中运行过**
+- 能被验证的部分**都验证了**：`patrol_core` 全部 56 项单测通过；
+  `patrol_ros.route_from_dict`（路线 JSON 加载）也在测试覆盖内
+- **上机前请先在 Gazebo + Nav2 仿真里跑一遍**
+
+### 其他边界
+
+- **没有真实机器人**：所有导航测试跑在 `SimNavBackend` 上（它模拟移动耗时、超时、被挡、取消）
+- **没有自定义 msg/srv/action 定义**：当前只用 `std_msgs/String`、`std_msgs/Bool`、
+  `std_srvs/Trigger`，够用；要暴露成 Action 需补 `.action` 文件
+- **未实现**：激光/视觉避障（交给 Nav2）、动态障碍重规划、多机协同巡检、
+  Web 看板、历史数据落库、TTS 与摄像头的真实驱动（`speaker`/`reader` 是回调注入点）
+- **异常判定是阈值型**：没做趋势预测与多传感器融合诊断
+- 报告里的数值来自仿真，**不代表任何真实巡检结论**
+
+**下一步可做**：接 Gazebo + Nav2 做端到端；补自定义 Action 暴露"跑一趟巡检"；
+加电池话题订阅与真实充电桩对接；加 WebSocket 看板推实时状态。
+
+---
+
+## 8. 许可
+
+MIT
